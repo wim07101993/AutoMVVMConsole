@@ -75,7 +75,7 @@ namespace AutoConsole
                     if (!EnumerableExtensions.IsNullOrEmpty(parameters))
                     {
                         foreach (var parameter in parameters)
-                            Question += $"{parameter.ParameterType} {parameter.GetName()}, ";
+                            Question += $"{parameter.ParameterType.Name} {parameter.GetName()}, ";
 
                         Question = Question.Substring(0, Question.Length - 2);
                     }
