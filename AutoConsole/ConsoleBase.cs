@@ -22,7 +22,7 @@ namespace AutoConsole
     {
         #region FIELDS
 
-        private ObservableCollection<object> _DataContextHierarchy;
+        private ObservableCollection<object> _dataContextHierarchy;
 
         #endregion FIELDS
 
@@ -70,24 +70,36 @@ namespace AutoConsole
         /// If none of the members of the class have the attribute, all properties and methods are shown.
         /// </para>
         /// </summary>
-        public ObservableCollection<object> DataContextHierarchy
+        protected ObservableCollection<object> DataContextHierarchy
         {
-            get { return _DataContextHierarchy; }
-            protected set
+            get { return _dataContextHierarchy; }
+            set
             {
-                if (Equals(_DataContextHierarchy, value))
+                if (Equals(_dataContextHierarchy, value))
                     return;
 
-                if (_DataContextHierarchy != null)
-                    _DataContextHierarchy.CollectionChanged -= _DataContextHierarchy_CollectionChanged;
+                if (_dataContextHierarchy != null)
+                    _dataContextHierarchy.CollectionChanged -= _DataContextHierarchy_CollectionChanged;
 
-                Set(ref _DataContextHierarchy, value);
+                Set(ref _dataContextHierarchy, value);
                 CreateQuestion();
                 RaisePropertyChanged(() => BaseDataContext);
                 RaisePropertyChanged(() => DataContext);
 
-                _DataContextHierarchy.CollectionChanged += _DataContextHierarchy_CollectionChanged;
+                _dataContextHierarchy.CollectionChanged += _DataContextHierarchy_CollectionChanged;
             }
+        }
+        /// <summary>
+        /// <para>Gets the data context hierarchy of the class.</para>
+        /// <para>The data context is the object from which this object gets its methods and properties.</para>
+        /// <para>
+        /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
+        /// If none of the members of the class have the attribute, all properties and methods are shown.
+        /// </para>
+        /// </summary>
+        public IReadOnlyCollection<object> ReadOnlyDataContextHierarchy
+        {
+            get { return DataContextHierarchy; }
         }
 
         /// <summary>
@@ -108,6 +120,11 @@ namespace AutoConsole
 
         #region  METHODS
 
+        /// <summary>
+        /// This method is called when the <see cref="DataContextHierarchy"/> property is changed. It regenerates the <see cref="Question"/> and raises a property changed on the <see cref="DataContext"/>
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
         private void _DataContextHierarchy_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
         {
             CreateQuestion();
@@ -127,6 +144,8 @@ namespace AutoConsole
 
             AddMethodsToQuestion();
             AddPropertiesToQuestion();
+
+            RaisePropertyChanged(() => Question);
         }
 
         /// <summary>
@@ -252,12 +271,12 @@ namespace AutoConsole
                 throw new ArgumentNullException(nameof(dataContext));
 
 
-            var goDeeperString = "->";
-            var goDeeperInDataContext = false;
-            if (str.Length > 2 && str.Substring(0, 2) == goDeeperString)
+            var newHierarchyLevelString = "->";
+            var newHierarchyLevel = false;
+            if (str.Length > 2 && str.Substring(0, 2) == newHierarchyLevelString)
             {
-                goDeeperInDataContext = true;
-                goDeeperString = "";
+                newHierarchyLevel = true;
+                newHierarchyLevelString = "";
                 str = str.Substring(2);
             }
             object ret = null;
@@ -269,7 +288,7 @@ namespace AutoConsole
             if (splitChar == '0' && TryParse(str.Trim(' '), out object obj, dataContext))
                 ret = obj;
             else if (splitChar == chars[0] && TryParse(split[0].Trim(' '), out obj, dataContext))
-                ret = ConvertStringToObject(goDeeperString + split[1], obj);
+                ret = ConvertStringToObject(newHierarchyLevelString + split[1], obj);
             else if (splitChar == chars[1] && split[1].Contains(")"))
             {
                 var splitParametersAndRest = split[1].SplitOnFirst(')');
@@ -285,7 +304,7 @@ namespace AutoConsole
                     if (TryParse(split[0].Trim(' '), out obj, dataContext, parameters))
                     {
                         return splitParametersAndRest.Length > 1
-                            ? ConvertStringToObject(goDeeperString + splitParametersAndRest[1], obj)
+                            ? ConvertStringToObject(newHierarchyLevelString + splitParametersAndRest[1], obj)
                             : obj;
                     }
 
@@ -309,7 +328,7 @@ namespace AutoConsole
                 return null;
             }
 
-            if (goDeeperInDataContext)
+            if (newHierarchyLevel)
                 DataContextHierarchy.Add(ret);
             return ret;
         }
@@ -405,15 +424,41 @@ namespace AutoConsole
                             .Find(x => x.GetDisplayName() == str &&
                                 EnumerableExtensions.IsNullOrEmpty(x.GetParameters()));
                 else
-                    method = (from m in dataContext.GetType().GetMethods()
-                              let mParameters = m.GetParameters()
-                              where m.GetDisplayName() == str
-                              && mParameters.Length == parameters.Length
-                              && !parameters.Where(
-                                  (t, i) => t.GetType() != mParameters[i].ParameterType)
-                                  .Any()
-                              select m)
-                              .FirstOrDefault();
+                {
+                    method = null;
+                    foreach (var m in dataContext.GetType().GetMethods())
+                    {
+                        ParameterInfo[] mParameters = m.GetParameters();
+
+                        if (m.GetDisplayName() != str || mParameters.Length != parameters.Length)
+                            continue;
+
+                        for (var i = 0; i < parameters.Length; i++)
+                        {
+                            if (mParameters[i].ParameterType == parameters[i].GetType())
+                            {
+                                method = m;
+                                break;
+                            }
+
+                            try
+                            {
+                                var changeType = Convert.ChangeType(parameters[i], mParameters[i].ParameterType);
+                                method = m;
+                                break;
+                            }
+                            catch (InvalidCastException)
+                            {
+                            }
+                            catch (FormatException)
+                            {
+                            }
+                        }
+
+                        if (method != null)
+                            break;
+                    }
+                }
 
 
                 if (method != null)
