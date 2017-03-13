@@ -1,23 +1,28 @@
 ﻿using AutoConsole.Attributes;
 using ClassLibrary.Extensions;
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
-using System.Security.Cryptography;
 
 namespace AutoConsole
 {
+    /// <summary>
+    /// <para>Class to automaticly generate a console application with the methods and properties of a given data context.</para>
+    /// <para>
+    /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
+    /// If none of the members of the class have the attribute, all properties and methods are shown.
+    /// </para>
+    /// </summary>
     public class ConsoleBase
     {
 
         #region FIELDS
-
+        /// <summary>
+        /// Field behind the dataContext of this view
+        /// </summary>
         private object _dataContext;
-
-        private bool _exit;
-        private bool _return;
 
         #endregion FIELDS
 
@@ -25,6 +30,14 @@ namespace AutoConsole
 
         #region  PROPERTIES
 
+        /// <summary>
+        /// <para>Gets or sets the data context for the class.</para>
+        /// <para>The data context is the object from which this object gets its methods and properties.</para>
+        /// <para>
+        /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
+        /// If none of the members of the class have the attribute, all properties and methods are shown.
+        /// </para>
+        /// </summary>
         public object DataContext
         {
             get { return _dataContext; }
@@ -39,8 +52,17 @@ namespace AutoConsole
             }
         }
 
-        public string Question { get; set; }
-        internal List<Answer> AnswerList { get; set; }
+        /// <summary>
+        /// <para>Gets or sets the question that is asked to the user of the application.</para>
+        /// </summary>
+        public string Question { get; protected set; }
+
+        /// <summary>
+        /// <para>Gets or sets the <see cref="bool"/> that stops the infinite loop of asking the <see cref="Question"/>.</para>
+        /// <para>True: stop asking</para> 
+        /// <para>False: if the method <see cref="AskQuestion"/> is called, the application continues asking the <see cref="Question"/></para>
+        /// </summary>
+        public bool Exit { protected get; set; }
 
         #endregion PROPERTIES
 
@@ -48,6 +70,13 @@ namespace AutoConsole
 
         #region  METHODS
 
+        /// <summary>
+        /// <para>Creates a question whith the given data context.</para>
+        /// <para>
+        /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
+        /// If none of the members of the class have the attribute, all properties and methods are shown.
+        /// </para>
+        /// </summary>
         private void CreateQuestion()
         {
             Question = _dataContext.ToString();
@@ -55,6 +84,11 @@ namespace AutoConsole
             AddMethodsToQuestion();
             AddPropertiesToQuestion();
         }
+
+        /// <summary>
+        /// <para>Adds the methods that have the <see cref="ShowInConsoleAttribute"/> attribute to the property <see cref="Question"/>.</para>
+        /// <para>If none of the methods of the class have the attribute, all and methods are shown.</para>
+        /// </summary>
         private void AddMethodsToQuestion()
         {
             Question += "\r\nMETHODS:";
@@ -63,6 +97,9 @@ namespace AutoConsole
                 .GetMethods()
                 .Where(x => Attribute.IsDefined(x, typeof(ShowInConsoleAttribute)))
                 .ToList();
+
+            if (EnumerableExtensions.IsNullOrEmpty(methods))
+                methods = _dataContext.GetType().GetMethods().ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(methods))
                 Question += "\r\nNo visible methods";
@@ -83,6 +120,10 @@ namespace AutoConsole
                     Question += ")";
                 }
         }
+        /// <summary>
+        /// <para>Adds the methods that have the <see cref="ShowInConsoleAttribute"/> attribute to the property <see cref="Question"/>.</para>
+        /// <para>If none of the methods of the class have the attribute, all and methods are shown.</para>
+        /// </summary>
         private void AddPropertiesToQuestion()
         {
             Question += "\r\nPROPERTIES:";
@@ -93,6 +134,9 @@ namespace AutoConsole
                 .ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(properties))
+                properties = _dataContext.GetType().GetProperties().ToList();
+
+            if (EnumerableExtensions.IsNullOrEmpty(properties))
                 Question += "\r\nNo visible properties";
             else
                 foreach (var property in properties)
@@ -100,9 +144,13 @@ namespace AutoConsole
 
         }
 
+        /// <summary>
+        /// <para>Starts an infinite loop in which the application asks the <see cref="Question"/>, waits for an answer and replies.</para>
+        /// <para>The loop stops when the "exit" command is given, the property <see cref="Exit"/> is set to true or the application is shut down.</para>
+        /// </summary>
         public void AskQuestion()
         {
-            while (!_exit)
+            while (!Exit)
             {
                 Console.WriteLine(Question);
 
@@ -111,26 +159,15 @@ namespace AutoConsole
                 CheckIfStringIsSystemParameter(stringAnswer);
 
                 Console.WriteLine(ConvertStringToObject(stringAnswer, DataContext));
-
-                AnswerQuestion();
             }
         }
-        private void AnswerQuestion()
-        {
-            if (EnumerableExtensions.IsNullOrEmpty(AnswerList))
-                return;
 
-            var temp = new object();
-
-            foreach (var answer in AnswerList)
-                temp = answer.GetValue();
-
-            if (temp == null)
-                Console.WriteLine("null");
-            else
-                Console.WriteLine(temp);
-        }
-
+        /// <summary>
+        /// <para>Checks if <see cref="str"/> is a system parameter:</para>
+        /// <para>exit: shut the application down</para>
+        /// <para>return: return to the base data context</para>
+        /// </summary>
+        /// <param name="str">string input</param>
         private void CheckIfStringIsSystemParameter(string str)
         {
             switch (str.ToLower())
@@ -139,12 +176,25 @@ namespace AutoConsole
                     Environment.Exit(Environment.ExitCode);
                     break;
                 case "return":
-                    AnswerList.Clear();
                     CreateQuestion();
-                    _exit = true;
                     break;
             }
         }
+
+        /// <summary>
+        /// <para>
+        /// The method returns the value as if you wrote the code in the editor.
+        /// </para>
+        /// <para>
+        /// Detects if the given string contains out of methods and/or parameters and/or just values ans splits it in those parts.
+        /// </para>
+        /// <para>
+        /// Applies a <see cref="TryParse(string,out object,object)"/> on the parts.
+        /// </para>
+        /// </summary>
+        /// <param name="str">string to convert</param>
+        /// <param name="dataContext"><see cref="object"/> to find the properties and methods in</param>
+        /// <returns>The result object of the statement</returns>
         private object ConvertStringToObject(string str, object dataContext)
         {
             if (string.IsNullOrWhiteSpace(str))
@@ -200,6 +250,24 @@ namespace AutoConsole
             return null;
         }
 
+        /// <summary>
+        /// <para>
+        /// Tries to parse the <see cref="str"/> parameter to a base type.
+        /// </para>
+        /// <para>
+        /// If it is unable to parse, it searches for a property with the same display name (assigned with the <see cref="DisplayNameAttribute"/> attribute).
+        /// </para>
+        /// <para>
+        /// If there is no property with thath name, it tries to deserialize the string <see cref="str"/> with JSON.
+        /// </para>
+        /// <para>
+        /// Else the object parameter <see cref="obj"/> is set to null and false is returned.
+        /// </para>
+        /// </summary>
+        /// <param name="str">String to parse</param>
+        /// <param name="obj">Object in which the parsed value is stored</param>
+        /// <param name="dataContext">Object that is used as data context</param>
+        /// <returns>true: parse succeeded, false: parse failed</returns>
         private static bool TryParse(string str, out object obj, object dataContext = null)
         {
             obj = null;
@@ -227,12 +295,10 @@ namespace AutoConsole
 
             else if (dataContext != null)
             {
-                var member = dataContext.GetType().GetMembers().Find(x => x.GetDisplayName() == str);
-                if (member == null)
+                var property = dataContext.GetType().GetProperties().Find(x => x.GetDisplayName() == str);
+                if (property == null)
                     return false;
-
-                var method = member as PropertyInfo;
-                obj = method?.GetValue(dataContext);
+                obj = property.GetValue(dataContext);
             }
             else
                 try
@@ -246,6 +312,23 @@ namespace AutoConsole
 
             return obj != null;
         }
+        /// <summary>
+        /// <para>
+        /// Searches for a method ith the same display name (assigned with the <see cref="DisplayNameAttribute"/> attribute) and parametertypes as the
+        /// given parameters in the <see cref="parameters"/> parameter.
+        /// </para>
+        /// <para>
+        /// If there is such method, it is excecuted with the parameters.
+        /// </para>
+        /// <para>
+        /// Else the object parameter <see cref="obj"/> is set to null and false is returned.
+        /// </para>
+        /// </summary>
+        /// <param name="str">String to parse</param>
+        /// <param name="obj">Object in which the parsed value is stored</param>
+        /// <param name="dataContext">Object that is used as data context</param>
+        /// <param name="parameters">parameters for the method</param>
+        /// <returns>true: parse succeeded, false: parse failed</returns>
         private static bool TryParse(string str, out object obj, object dataContext, object[] parameters)
         {
             if (dataContext != null)
@@ -280,16 +363,12 @@ namespace AutoConsole
             return false;
         }
 
-
+        /// <summary>
+        /// Prints an error message in the console.
+        /// </summary>
         protected void CommandNotKnown()
         {
             Console.WriteLine("Command unknown");
-        }
-
-        protected void RemoveLastAnswer()
-        {
-            if (EnumerableExtensions.IsNullOrEmpty(AnswerList))
-                AnswerList.RemoveAt(AnswerList.Count - 1);
         }
 
         #endregion METHODS
