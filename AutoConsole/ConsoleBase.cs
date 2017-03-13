@@ -2,9 +2,12 @@
 using ClassLibrary.Extensions;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
+using GalaSoft.MvvmLight;
 
 namespace AutoConsole
 {
@@ -15,23 +18,22 @@ namespace AutoConsole
     /// If none of the members of the class have the attribute, all properties and methods are shown.
     /// </para>
     /// </summary>
-    public class ConsoleBase
+    public class ConsoleBase : ObservableObject
     {
-
         #region FIELDS
-        /// <summary>
-        /// Field behind the dataContext of this view
-        /// </summary>
-        private object _dataContext;
+
+        private ObservableCollection<object> _DataContextHierarchy;
 
         #endregion FIELDS
-
 
 
         #region  PROPERTIES
 
         /// <summary>
-        /// <para>Gets or sets the data context for the class.</para>
+        /// <para>
+        /// Gets the current data context (last of the <see cref="DataContextHierarchy"/> properties)
+        /// or sets the <see cref="DataContextHierarchy"/> property to a new <see cref="List{T}"/> with the value in.
+        /// </para>
         /// <para>The data context is the object from which this object gets its methods and properties.</para>
         /// <para>
         /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
@@ -40,15 +42,51 @@ namespace AutoConsole
         /// </summary>
         public object DataContext
         {
-            get { return _dataContext; }
-            set
+            get { return DataContextHierarchy.Last(); }
+            set { DataContextHierarchy = new ObservableCollection<object> { value }; }
+        }
+        /// <summary>
+        /// <para>
+        /// Gets the base data context (first of the <see cref="DataContextHierarchy"/> properties)
+        /// or sets the <see cref="DataContextHierarchy"/> property to a new <see cref="List{T}"/> with the value in.
+        /// </para>
+        /// <para>The data context is the object from which this object gets its methods and properties.</para>
+        /// <para>
+        /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
+        /// If none of the members of the class have the attribute, all properties and methods are shown.
+        /// </para>
+        /// </summary>
+        public object BaseDataContext
+        {
+            get { return DataContextHierarchy.First(); }
+            set { DataContextHierarchy = new ObservableCollection<object> { value }; }
+        }
+
+        /// <summary>
+        /// <para>Gets or sets the data context hierarchy of the class.</para>
+        /// <para>The data context is the object from which this object gets its methods and properties.</para>
+        /// <para>
+        /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
+        /// If none of the members of the class have the attribute, all properties and methods are shown.
+        /// </para>
+        /// </summary>
+        public ObservableCollection<object> DataContextHierarchy
+        {
+            get { return _DataContextHierarchy; }
+            protected set
             {
-                if (Equals(_dataContext, value))
+                if (Equals(_DataContextHierarchy, value))
                     return;
 
-                _dataContext = value;
+                if (_DataContextHierarchy != null)
+                    _DataContextHierarchy.CollectionChanged -= _DataContextHierarchy_CollectionChanged;
 
+                Set(ref _DataContextHierarchy, value);
                 CreateQuestion();
+                RaisePropertyChanged(() => BaseDataContext);
+                RaisePropertyChanged(() => DataContext);
+
+                _DataContextHierarchy.CollectionChanged += _DataContextHierarchy_CollectionChanged;
             }
         }
 
@@ -62,13 +100,19 @@ namespace AutoConsole
         /// <para>True: stop asking</para> 
         /// <para>False: if the method <see cref="AskQuestion"/> is called, the application continues asking the <see cref="Question"/></para>
         /// </summary>
-        public bool Exit { protected get; set; }
+        public bool Exit { protected get; set; } = false;
 
         #endregion PROPERTIES
 
 
 
         #region  METHODS
+
+        private void _DataContextHierarchy_CollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            CreateQuestion();
+            RaisePropertyChanged(() => DataContext);
+        }
 
         /// <summary>
         /// <para>Creates a question whith the given data context.</para>
@@ -79,7 +123,7 @@ namespace AutoConsole
         /// </summary>
         private void CreateQuestion()
         {
-            Question = _dataContext.ToString();
+            Question = DataContext.ToString();
 
             AddMethodsToQuestion();
             AddPropertiesToQuestion();
@@ -92,14 +136,14 @@ namespace AutoConsole
         private void AddMethodsToQuestion()
         {
             Question += "\r\nMETHODS:";
-            var methods = _dataContext
+            var methods = DataContext
                 .GetType()
                 .GetMethods()
                 .Where(x => Attribute.IsDefined(x, typeof(ShowInConsoleAttribute)))
                 .ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(methods))
-                methods = _dataContext.GetType().GetMethods().ToList();
+                methods = DataContext.GetType().GetMethods().ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(methods))
                 Question += "\r\nNo visible methods";
@@ -127,20 +171,20 @@ namespace AutoConsole
         private void AddPropertiesToQuestion()
         {
             Question += "\r\nPROPERTIES:";
-            var properties = _dataContext
+            var properties = DataContext
                 .GetType()
                 .GetProperties()
                 .Where(x => Attribute.IsDefined(x, typeof(ShowInConsoleAttribute)))
                 .ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(properties))
-                properties = _dataContext.GetType().GetProperties().ToList();
+                properties = DataContext.GetType().GetProperties().ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(properties))
                 Question += "\r\nNo visible properties";
             else
                 foreach (var property in properties)
-                    Question += $"\r\n\t- {property.GetDisplayName()}";
+                    Question += $"\r\n\t- {property.GetDisplayName()} ({property.PropertyType.Name})";
 
         }
 
@@ -156,9 +200,8 @@ namespace AutoConsole
 
                 var stringAnswer = Console.ReadLine();
 
-                CheckIfStringIsSystemParameter(stringAnswer);
-
-                Console.WriteLine(ConvertStringToObject(stringAnswer, DataContext));
+                if (!CheckIfStringIsSystemParameter(stringAnswer))
+                    Console.WriteLine(ConvertStringToObject(stringAnswer, DataContext));
             }
         }
 
@@ -166,9 +209,10 @@ namespace AutoConsole
         /// <para>Checks if <see cref="str"/> is a system parameter:</para>
         /// <para>exit: shut the application down</para>
         /// <para>return: return to the base data context</para>
+        /// <para>clear or cls: clears the screen</para>
         /// </summary>
         /// <param name="str">string input</param>
-        private void CheckIfStringIsSystemParameter(string str)
+        private bool CheckIfStringIsSystemParameter(string str)
         {
             switch (str.ToLower())
             {
@@ -176,9 +220,14 @@ namespace AutoConsole
                     Environment.Exit(Environment.ExitCode);
                     break;
                 case "return":
-                    CreateQuestion();
-                    break;
+                    RemoveLastAnswer();
+                    return true;
+                case "clear":
+                case "cls":
+                    Console.Clear();
+                    return true;
             }
+            return false;
         }
 
         /// <summary>
@@ -202,52 +251,67 @@ namespace AutoConsole
             if (dataContext == null)
                 throw new ArgumentNullException(nameof(dataContext));
 
+
+            var goDeeperString = "->";
+            var goDeeperInDataContext = false;
+            if (str.Length > 2 && str.Substring(0, 2) == goDeeperString)
+            {
+                goDeeperInDataContext = true;
+                goDeeperString = "";
+                str = str.Substring(2);
+            }
+            object ret = null;
+
+
             char[] chars = { '.', '(' };
             var splitChar = str.SplitOnFirst(chars, out string[] split);
 
             if (splitChar == '0' && TryParse(str.Trim(' '), out object obj, dataContext))
-                return obj;
+                ret = obj;
+            else if (splitChar == chars[0] && TryParse(split[0].Trim(' '), out obj, dataContext))
+                ret = ConvertStringToObject(goDeeperString + split[1], obj);
+            else if (splitChar == chars[1] && split[1].Contains(")"))
+            {
+                var splitParametersAndRest = split[1].SplitOnFirst(')');
 
-            if (splitChar == chars[0] && TryParse(split[0].Trim(' '), out obj, dataContext))
-                return ConvertStringToObject(split[1], obj);
+                var stringParameters = splitParametersAndRest[0].Split(',');
 
-            if (splitChar != chars[1] || !split[1].Contains(")"))
+                if (stringParameters.Length > 1)
+                {
+                    var parameters =
+                        stringParameters.Select(stringParameter => ConvertStringToObject(stringParameter, dataContext))
+                            .ToArray();
+
+                    if (TryParse(split[0].Trim(' '), out obj, dataContext, parameters))
+                    {
+                        return splitParametersAndRest.Length > 1
+                            ? ConvertStringToObject(goDeeperString + splitParametersAndRest[1], obj)
+                            : obj;
+                    }
+
+                }
+                else
+                {
+                    object[] parameters = null;
+                    if (!string.IsNullOrWhiteSpace(splitParametersAndRest[0])
+                        && TryParse(splitParametersAndRest[0].Trim(' '), out object parameter, dataContext))
+                        parameters = new[] { parameter };
+
+                    if (TryParse(split[0].Trim(' '), out obj, dataContext, parameters))
+                        return obj;
+                }
+            }
+
+
+            if (ret == null)
             {
                 CommandNotKnown();
                 return null;
             }
 
-            var splitParametersAndRest = split[1].SplitOnFirst(')');
-
-            var stringParameters = splitParametersAndRest[0].Split(',');
-
-            if (stringParameters.Length > 1)
-            {
-                var parameters =
-                    stringParameters.Select(stringParameter => ConvertStringToObject(stringParameter, dataContext))
-                        .ToArray();
-
-                if (TryParse(split[0].Trim(' '), out obj, dataContext, parameters))
-                {
-                    return splitParametersAndRest.Length > 1
-                        ? ConvertStringToObject(splitParametersAndRest[1], obj)
-                        : obj;
-                }
-
-            }
-            else
-            {
-                object[] parameters = null;
-                if (!string.IsNullOrWhiteSpace(splitParametersAndRest[0])
-                    && TryParse(splitParametersAndRest[0].Trim(' '), out object parameter, dataContext))
-                    parameters = new[] { parameter };
-
-                if (TryParse(split[0].Trim(' '), out obj, dataContext, parameters))
-                    return obj;
-            }
-
-            CommandNotKnown();
-            return null;
+            if (goDeeperInDataContext)
+                DataContextHierarchy.Add(ret);
+            return ret;
         }
 
         /// <summary>
@@ -369,6 +433,11 @@ namespace AutoConsole
         protected void CommandNotKnown()
         {
             Console.WriteLine("Command unknown");
+        }
+
+        protected void RemoveLastAnswer()
+        {
+            DataContextHierarchy.RemoveAt(DataContextHierarchy.Count - 1);
         }
 
         #endregion METHODS
