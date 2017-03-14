@@ -27,6 +27,7 @@ namespace AutoConsole
         #endregion FIELDS
 
 
+
         #region  PROPERTIES
 
         /// <summary>
@@ -270,59 +271,76 @@ namespace AutoConsole
             if (dataContext == null)
                 throw new ArgumentNullException(nameof(dataContext));
 
-
             var newHierarchyLevelString = "->";
             var newHierarchyLevel = false;
-            if (str.Length > 2 && str.Substring(0, 2) == newHierarchyLevelString)
-            {
-                newHierarchyLevel = true;
-                newHierarchyLevelString = "";
-                str = str.Substring(2);
-            }
+            var commandNotKnown = true;
             object ret = null;
 
-
-            char[] chars = { '.', '(' };
-            var splitChar = str.SplitOnFirst(chars, out string[] split);
-
-            if (splitChar == '0' && TryParse(str.Trim(' '), out object obj, dataContext))
-                ret = obj;
-            else if (splitChar == chars[0] && TryParse(split[0].Trim(' '), out obj, dataContext))
-                ret = ConvertStringToObject(newHierarchyLevelString + split[1], obj);
-            else if (splitChar == chars[1] && split[1].Contains(")"))
+            // check if user wants to get deeper in datacontext
+            if (str.Length <= 2 || str.Substring(0, 2) != newHierarchyLevelString)
+                newHierarchyLevelString = "";
+            else
             {
-                var splitParametersAndRest = split[1].SplitOnFirst(')');
-
-                var stringParameters = splitParametersAndRest[0].Split(',');
-
-                if (stringParameters.Length > 1)
-                {
-                    var parameters =
-                        stringParameters.Select(stringParameter => ConvertStringToObject(stringParameter, dataContext))
-                            .ToArray();
-
-                    if (TryParse(split[0].Trim(' '), out obj, dataContext, parameters))
-                    {
-                        return splitParametersAndRest.Length > 1
-                            ? ConvertStringToObject(newHierarchyLevelString + splitParametersAndRest[1], obj)
-                            : obj;
-                    }
-
-                }
-                else
-                {
-                    object[] parameters = null;
-                    if (!string.IsNullOrWhiteSpace(splitParametersAndRest[0])
-                        && TryParse(splitParametersAndRest[0].Trim(' '), out object parameter, dataContext))
-                        parameters = new[] { parameter };
-
-                    if (TryParse(split[0].Trim(' '), out obj, dataContext, parameters))
-                        return obj;
-                }
+                newHierarchyLevel = true;
+                str = str.Substring(2);
             }
 
 
-            if (ret == null)
+            // split on first character that is found
+            char[] chars = { '.', '(', '[' };
+            var splitChar = str.SplitOnFirst(chars, out string[] split);
+
+
+            // if no character is found and string is parsable
+            if (splitChar == '0' && TryParse(str.Trim(' '), out object obj, dataContext))
+            {
+                ret = obj;
+                commandNotKnown = false;
+            }
+
+            // if character is '.' and part before '.' is parsable
+            else if (splitChar == chars[0] && TryParse(split[0].Trim(' '), out obj, dataContext))
+            {
+                ret = ConvertStringToObject(newHierarchyLevelString + split[1], obj);
+                commandNotKnown = false;
+            }
+
+            // if character is '('
+            else if (splitChar == chars[1] && split[1].Contains(")"))
+            {
+                object[] parameters = null;
+
+                // search for the second bracket
+                var splitParametersAndRest = split[1].SplitOnFirst(')');
+                // split the parameters-string into parts
+                var stringParameters = splitParametersAndRest[0].Split(',');
+
+                // only one parameter => parse string
+                if (stringParameters.Length == 1 && !string.IsNullOrWhiteSpace(stringParameters[0])
+                    && TryParse(stringParameters[0].Trim(), out object parameter, dataContext))
+                    parameters = new[] { parameter };
+                // more than one parameter => convert string to parameters
+                else if (stringParameters.Length > 1)
+                    parameters = stringParameters
+                        .Select(p => ConvertStringToObject(p, dataContext))
+                        .ToArray();
+
+                // parse the method
+                if (TryParse(split[0].Trim(), out obj, dataContext, parameters))
+                    if (splitParametersAndRest.Length > 1 && splitParametersAndRest[1][0] == '.')
+                    {
+                        ret = ConvertStringToObject(newHierarchyLevelString + splitParametersAndRest[1].Substring(1), obj);
+                        commandNotKnown = false;
+                    }
+                    else
+                    {
+                        ret = obj;
+                        commandNotKnown = false;
+                    }
+            }
+
+
+            if (commandNotKnown)
             {
                 CommandNotKnown();
                 return null;
