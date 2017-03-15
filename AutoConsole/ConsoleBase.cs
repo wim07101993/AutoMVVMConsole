@@ -118,9 +118,14 @@ namespace AutoConsole
         /// </summary>
         public bool Exit { protected get; set; } = false;
 
+        /// <summary>
+        /// Gets or sets the <see cref="bool"/> that indicates if all members should be shown on en console or just those with the <see cref="ShowInConsoleAttribute"/>
+        /// </summary>
+        public bool ShowAllMembers { private get; set; }
 
-        public bool ShowAllMembers { get; set; }
-
+        /// <summary>
+        /// Gets or sets the <see cref="bool"/> that indicates if the members should be shown. This happenes only once, after that they are shown, the value automatically resets
+        /// </summary>
         public bool ShowAvailableMembersOnce
         {
             private get
