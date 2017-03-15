@@ -24,7 +24,8 @@ namespace AutoConsole
         #region FIELDS
 
         private ObservableCollection<object> _dataContextHierarchy;
-        private bool _didNotKnowCommand = false;
+        private bool _didNotKnowCommand;
+        private bool _showAvailableMembersOnce;
 
         #endregion FIELDS
 
@@ -117,6 +118,20 @@ namespace AutoConsole
         /// </summary>
         public bool Exit { protected get; set; } = false;
 
+
+        public bool ShowAllMembers { get; set; }
+
+        public bool ShowAvailableMembersOnce
+        {
+            private get
+            {
+                var temp = _showAvailableMembersOnce;
+                _showAvailableMembersOnce = false;
+                return temp;
+            }
+            set { Set(ref _showAvailableMembersOnce, value); }
+        }
+
         #endregion PROPERTIES
 
 
@@ -135,6 +150,46 @@ namespace AutoConsole
         }
 
         /// <summary>
+        /// <para>Starts an infinite loop in which the application asks the <see cref="Question"/>, waits for an answer and replies.</para>
+        /// <para>The loop stops when the "exit" command is given, the property <see cref="Exit"/> is set to true or the application is shut down.</para>
+        /// </summary>
+        public void AskQuestion()
+        {
+            do
+            {
+                _didNotKnowCommand = false;
+
+                if (ShowAvailableMembersOnce)
+                {
+                    Console.WriteLine(Question);
+                    ShowAvailableMembersOnce = false;
+                }
+
+                var stringAnswer = Console.ReadLine();
+
+                if (!CheckIfStringIsSystemParameter(stringAnswer))
+                    Console.WriteLine(ConvertStringToObject(stringAnswer, DataContext));
+
+                Console.WriteLine("\r");
+            } while (!Exit);
+        }
+
+        /// <summary>
+        /// Prints an error message in the console.
+        /// </summary>
+        protected void CommandNotKnown()
+        {
+            if (_didNotKnowCommand)
+                return;
+
+            Console.WriteLine("Command unknown");
+            _didNotKnowCommand = true;
+        }
+
+
+        #region create question
+
+        /// <summary>
         /// <para>Creates a question whith the given data context.</para>
         /// <para>
         /// The methods and properties shown are those that have the <see cref="ShowInConsoleAttribute"/> attribute.
@@ -148,6 +203,7 @@ namespace AutoConsole
             AddMethodsToQuestion();
             AddPropertiesToQuestion();
 
+            ShowAvailableMembersOnce = true;
             RaisePropertyChanged(() => Question);
         }
 
@@ -158,11 +214,18 @@ namespace AutoConsole
         private void AddMethodsToQuestion()
         {
             Question += "\r\nMETHODS:";
-            var methods = DataContext
-                .GetType()
-                .GetMethods()
-                .Where(x => Attribute.IsDefined(x, typeof(ShowInConsoleAttribute)))
-                .ToList();
+            IEnumerable<MethodInfo> methods;
+            if (ShowAllMembers)
+                methods = DataContext
+                    .GetType()
+                    .GetMethods()
+                    .ToList();
+            else
+                methods = DataContext
+                    .GetType()
+                    .GetMethods()
+                    .Where(x => Attribute.IsDefined(x, typeof(ShowInConsoleAttribute)))
+                    .ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(methods))
                 methods = DataContext.GetType().GetMethods().ToList();
@@ -193,11 +256,19 @@ namespace AutoConsole
         private void AddPropertiesToQuestion()
         {
             Question += "\r\nPROPERTIES:";
-            var properties = DataContext
-                .GetType()
-                .GetProperties()
-                .Where(x => Attribute.IsDefined(x, typeof(ShowInConsoleAttribute)))
-                .ToList();
+
+            IEnumerable<PropertyInfo> properties;
+            if (ShowAllMembers)
+                properties = DataContext
+                    .GetType()
+                    .GetProperties()
+                    .ToList();
+            else
+                properties = DataContext
+                    .GetType()
+                    .GetProperties()
+                    .Where(x => Attribute.IsDefined(x, typeof(ShowInConsoleAttribute)))
+                    .ToList();
 
             if (EnumerableExtensions.IsNullOrEmpty(properties))
                 properties = DataContext.GetType().GetProperties().ToList();
@@ -210,47 +281,72 @@ namespace AutoConsole
 
         }
 
-        /// <summary>
-        /// <para>Starts an infinite loop in which the application asks the <see cref="Question"/>, waits for an answer and replies.</para>
-        /// <para>The loop stops when the "exit" command is given, the property <see cref="Exit"/> is set to true or the application is shut down.</para>
-        /// </summary>
-        public void AskQuestion()
-        {
-            do
-            {
-                _didNotKnowCommand = false;
-                Console.WriteLine(Question);
+        #endregion create question
 
-                var stringAnswer = Console.ReadLine();
 
-                if (!CheckIfStringIsSystemParameter(stringAnswer))
-                    Console.WriteLine(ConvertStringToObject(stringAnswer, DataContext));
-
-                Console.WriteLine("\r");
-            } while (!Exit);
-        }
+        #region answer parsing
 
         /// <summary>
         /// <para>Checks if <see cref="str"/> is a system parameter:</para>
         /// <para>exit: shut the application down</para>
         /// <para>return: return to the base data context</para>
         /// <para>clear or cls: clears the screen</para>
+        /// <para>...</para>
         /// </summary>
         /// <param name="str">string input</param>
         private bool CheckIfStringIsSystemParameter(string str)
         {
             switch (str.ToLower())
             {
-                case "exit":
+                case "\\clear":
+                case "\\cls":
+                    Console.Clear();
+                    return true;
+                case "\\exit":
                     Environment.Exit(Environment.ExitCode);
-                    break;
+                    return true;
+                case "\\h":
+                case "\\help":
+                    const string help = "CASE INSENSITIVE\r\n" +
+                                        "- \\cls or \\clear:\t\tClears the screen\r\n" +
+                                        "- \\exit:\t\t\tShut the application down\r\n" +
+                                        "- \\h or \\help:\t\t\tShow all commands\r\n" +
+                                        "- \\m or \\members:\t\tShow the members of the data context\r\n" +
+                                        "- \\r or \\return:\t\tReturn to the base data context\r\n" +
+                                        "CASE SENSITIVE\r\n" +
+                                        "- return:\t\t\tReturn to the base data context\r\n" +
+                                        "- \\A or \\AllMembers:\t\tShow all the members of the data context\r\n" +
+                                        "- \\a or \\LimitedMembers:\tSow only the members with the \"ShowInConsoleAttribute\"";
+
+                    Console.WriteLine(help);
+                    ShowAvailableMembersOnce = true;
+                    return true;
+                case "\\m":
+                case "\\members":
+                    CreateQuestion();
+                    return true;
+                case "\\return":
                 case "return":
                     if (DataContextHierarchy.Count > 1)
                         DataContextHierarchy.RemoveLast();
+                    else
+                        Console.WriteLine("Allready on at level");
                     return true;
-                case "clear":
-                case "cls":
-                    Console.Clear();
+            }
+
+            switch (str)
+            {
+                case "\\A":
+                case "\\AllMembers":
+                    ShowAllMembers = true;
+                    Console.WriteLine("All members will be shown");
+                    CreateQuestion();
+                    return true;
+                case "\\a":
+                case "\\LimitedMembers":
+                    ShowAllMembers = false;
+                    Console.WriteLine("Only members with the \"ShowInConsoleAttribute\" will be shown");
+                    CreateQuestion();
                     return true;
             }
             return false;
@@ -316,12 +412,129 @@ namespace AutoConsole
             if (commandNotKnown)
                 CommandNotKnown();
             else if (newHierarchyLevel)
+            {
                 DataContextHierarchy.Add(ret);
+                ShowAvailableMembersOnce = true;
+            }
 
             return ret;
         }
 
+        /// <summary>
+        /// Parses a string into a method and excecutes it.
+        /// </summary>
+        /// <param name="dataContext">Data context to find method in</param>
+        /// <param name="str">Input string to parse and convert</param>
+        /// <param name="returnValue">Return value of the method</param>
+        /// <param name="leftOverString">Last part of the string that is not used (after closing bracket)</param>
+        /// <returns>True: successfull, false: failed</returns>
+        private bool ConvertMethodStringToReturnValue(
+            object dataContext, string str,
+            out object returnValue, out string leftOverString)
+        {
+            if (string.IsNullOrEmpty(str) || dataContext == null)
+            {
+                returnValue = null;
+                leftOverString = str;
+                return false;
+            }
+
+            var split = str.SplitOnFirst('(');
+            var methodName = split[0];
+            var rest = $"({split[1]}";
+
+            if (FindOpeningAndClosingBracket(
+                rest,
+                BracketType.Round,
+                out int openingBracketIndex,
+                out int closingBracketIndex))
+            {
+                leftOverString = rest.Substring(closingBracketIndex + 1);
+
+                var parameterStrings =
+                    ConvertStringToParameterStringArray(
+                        rest.Substring(openingBracketIndex + 1,
+                        closingBracketIndex - (openingBracketIndex + 1)));
+
+                var parameters = parameterStrings?
+                    .Select(parameterString => ConvertStringToObject(parameterString, dataContext))
+                    .ToArray();
+
+                if (TryParse(dataContext, methodName, parameters, out returnValue))
+                    return true;
+            }
+
+            returnValue = null;
+            leftOverString = str;
+            return false;
+        }
+
+        /// <summary>
+        /// Parses an indexing for an array or list and gives the value of that index back.
+        /// </summary>
+        /// <param name="dataContext">Data context to find index-value in</param>
+        /// <param name="str">Input string to parse and convert</param>
+        /// <param name="returnValue">Value of index</param>
+        /// <param name="leftOverString">Last part of the string that is not used (after closing bracket)</param>
+        /// <returns>True: successfull, false: failed</returns>
+        private bool ConvertArraySelectorStringToReturnValue(
+            object dataContext, string str,
+            out object returnValue, out string leftOverString)
+        {
+            if (string.IsNullOrEmpty(str) || dataContext == null)
+            {
+                returnValue = null;
+                leftOverString = str;
+                return false;
+            }
+
+            var split = str.SplitOnFirst('[');
+            var propertyName = split[0];
+            var rest = $"[{split[1]}";
+
+            if (FindOpeningAndClosingBracket(
+                rest,
+                BracketType.Square,
+                out int openingBracketIndex,
+                out int closingBracketIndex))
+            {
+                leftOverString = rest.Substring(closingBracketIndex + 1);
+
+                var stringIndex =
+                    ConvertStringToObject(rest.Substring(openingBracketIndex + 1, closingBracketIndex - 1), dataContext)?
+                        .ToString();
+
+                if (int.TryParse(stringIndex, out int index))
+                {
+                    if (string.IsNullOrWhiteSpace(propertyName) && dataContext is IEnumerable)
+                    {
+                        returnValue = ((IEnumerable)dataContext).Cast<object>().ElementAt(index);
+                        return true;
+                    }
+
+                    if (TryParse(dataContext, propertyName, out object ret) && ret is IEnumerable)
+                    {
+                        returnValue = ((IEnumerable)ret).Cast<object>().ElementAt(index);
+                        return true;
+                    }
+                }
+            }
+
+            returnValue = null;
+            leftOverString = str;
+            return false;
+        }
+
         private enum BracketType { Square, Curly, Round }
+        /// <summary>
+        /// <para>Searches for the opening and closing bracket of a certain type.</para>
+        /// <para>Sqare = [], Curly = {}, Round = ()</para>
+        /// </summary>
+        /// <param name="str">Input string</param>
+        /// <param name="bracketType">Type of bracket to search for</param>
+        /// <param name="openingBracketIndex">Index of the opening bracket</param>
+        /// <param name="closingBracketIndex">Index of the closing bracket</param>
+        /// <returns>True: did find brackets, false: did not find brackets</returns>
         private static bool FindOpeningAndClosingBracket(
             string str, BracketType bracketType,
             out int openingBracketIndex, out int closingBracketIndex)
@@ -379,6 +592,11 @@ namespace AutoConsole
             return false;
         }
 
+        /// <summary>
+        /// Converts a string that represents the parameters of a method into an array of strings, the parameters
+        /// </summary>
+        /// <param name="str">Input parameters</param>
+        /// <returns>Array of paramters</returns>
         private static string[] ConvertStringToParameterStringArray(string str)
         {
             if (string.IsNullOrEmpty(str))
@@ -429,95 +647,6 @@ namespace AutoConsole
             }
 
             return parameters.ToArray();
-        }
-
-        private bool ConvertMethodStringToReturnValue(
-            object dataContext, string str,
-            out object returnValue, out string leftOverString)
-        {
-            if (string.IsNullOrEmpty(str) || dataContext == null)
-            {
-                returnValue = null;
-                leftOverString = str;
-                return false;
-            }
-
-            var split = str.SplitOnFirst('(');
-            var methodName = split[0];
-            var rest = $"({split[1]}";
-
-            if (FindOpeningAndClosingBracket(
-                rest,
-                BracketType.Round,
-                out int openingBracketIndex,
-                out int closingBracketIndex))
-            {
-                leftOverString = rest.Substring(closingBracketIndex + 1);
-
-                var parameterStrings =
-                    ConvertStringToParameterStringArray(
-                        rest.Substring(openingBracketIndex + 1,
-                        closingBracketIndex - (openingBracketIndex + 1)));
-
-                var parameters = parameterStrings?
-                    .Select(parameterString => ConvertStringToObject(parameterString, dataContext))
-                    .ToArray();
-
-                if (TryParse(dataContext, methodName, parameters, out returnValue))
-                    return true;
-            }
-
-            returnValue = null;
-            leftOverString = str;
-            return false;
-        }
-
-        private bool ConvertArraySelectorStringToReturnValue(
-            object dataContext, string str,
-            out object returnValue, out string leftOverString)
-        {
-            if (string.IsNullOrEmpty(str) || dataContext == null)
-            {
-                returnValue = null;
-                leftOverString = str;
-                return false;
-            }
-
-            var split = str.SplitOnFirst('[');
-            var propertyName = split[0];
-            var rest = $"[{split[1]}";
-
-            if (FindOpeningAndClosingBracket(
-                rest,
-                BracketType.Square,
-                out int openingBracketIndex,
-                out int closingBracketIndex))
-            {
-                leftOverString = rest.Substring(closingBracketIndex + 1);
-
-                var stringIndex =
-                    ConvertStringToObject(rest.Substring(openingBracketIndex + 1, closingBracketIndex - 1), dataContext)?
-                        .ToString();
-
-                if (int.TryParse(stringIndex, out int index))
-                {
-                    if (string.IsNullOrWhiteSpace(propertyName) && dataContext is IEnumerable)
-                    {
-                        returnValue = ((IEnumerable)dataContext).Cast<object>().ElementAt(index);
-                        return true;
-                    }
-
-                    if (TryParse(dataContext, propertyName, out object ret) && ret is IEnumerable)
-                    {
-                        returnValue = ((IEnumerable)ret).Cast<object>().ElementAt(index);
-                        return true;
-                    }
-                }
-            }
-
-            returnValue = null;
-            leftOverString = str;
-            return false;
         }
 
 
@@ -681,17 +810,7 @@ namespace AutoConsole
             return false;
         }
 
-        /// <summary>
-        /// Prints an error message in the console.
-        /// </summary>
-        protected void CommandNotKnown()
-        {
-            if (_didNotKnowCommand)
-                return;
-
-            Console.WriteLine("Command unknown");
-            _didNotKnowCommand = true;
-        }
+        #endregion answer parsing
 
         #endregion METHODS
     }
