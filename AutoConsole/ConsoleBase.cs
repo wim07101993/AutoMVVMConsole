@@ -1,6 +1,7 @@
 ﻿using AutoConsole.Attributes;
 using ClassLibrary.Extensions;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
@@ -216,7 +217,7 @@ namespace AutoConsole
         {
             while (!Exit)
             {
-                Console.WriteLine(Question);
+                Console.WriteLine($"\r\n{Question}");
 
                 var stringAnswer = Console.ReadLine();
 
@@ -271,6 +272,8 @@ namespace AutoConsole
             if (dataContext == null)
                 throw new ArgumentNullException(nameof(dataContext));
 
+            str = str.Trim();
+
             var newHierarchyLevelString = "->";
             var newHierarchyLevel = false;
             var commandNotKnown = true;
@@ -287,57 +290,70 @@ namespace AutoConsole
 
 
             // split on first character that is found
-            char[] chars = { '.', '(', '[' };
-            var splitChar = str.SplitOnFirst(chars, out string[] split);
+            var name = GetNameOfMember(str, out string rest, out char splitChar);
+
+            int openingBracketIndex;
+            int closingBracketIndex;
 
 
-            // if no character is found and string is parsable
-            if (splitChar == '0' && TryParse(str.Trim(' '), out object obj, dataContext))
+            if (splitChar == '.' && TryParse(dataContext, name, obj: out ret))
             {
-                ret = obj;
+                ret = ConvertStringToObject(newHierarchyLevelString + rest.Substring(1), ret);
                 commandNotKnown = false;
             }
-
-            // if character is '.' and part before '.' is parsable
-            else if (splitChar == chars[0] && TryParse(split[0].Trim(' '), out obj, dataContext))
+            else if (splitChar == '('
+                && FindOpeningAndClosingBracket(rest, BracketType.Round, out openingBracketIndex, out closingBracketIndex))
             {
-                ret = ConvertStringToObject(newHierarchyLevelString + split[1], obj);
+                var parameterStrings =
+                    ConvertStringToParameterStringArray(rest.Substring(openingBracketIndex + 1, closingBracketIndex - (openingBracketIndex + 1)));
+
+                var parameters = parameterStrings?
+                    .Select(parameterString => ConvertStringToObject(parameterString, dataContext))
+                    .ToArray();
+
+                if (TryParse(dataContext, name, parameters, out ret))
+                {
+                    if (closingBracketIndex < rest.Length - 1)
+                    {
+                        rest = rest.Substring(closingBracketIndex + 1)[0] == '.'
+                            ? rest.Substring(closingBracketIndex + 2)
+                            : rest.Substring(closingBracketIndex + 1);
+
+                        ret = ConvertStringToObject(rest, ret);
+                    }
+
+                    commandNotKnown = false;
+                }
+            }
+            else if (str[0] == '[' && FindOpeningAndClosingBracket(str, BracketType.Square, out openingBracketIndex, out closingBracketIndex))
+            {
+                var stringIndex =
+                    ConvertStringToObject(rest.Substring(openingBracketIndex + 1, closingBracketIndex - 1), dataContext)
+                        .ToString();
+
+                if (int.TryParse(stringIndex, out int index)
+                    && dataContext is IEnumerable)
+                {
+                    ret = ((IEnumerable)dataContext).Cast<object>().ElementAt(index);
+                    commandNotKnown = false;
+                }
+            }
+            else if (splitChar == '[' && FindOpeningAndClosingBracket(rest, BracketType.Square, out openingBracketIndex, out closingBracketIndex))
+            {
+                var stringIndex =
+                    ConvertStringToObject(rest.Substring(openingBracketIndex + 1, closingBracketIndex - 1), dataContext)
+                        .ToString();
+
+                if (int.TryParse(stringIndex, out int index)
+                    && TryParse(dataContext, name, out ret)
+                    && ret is IEnumerable)
+                {
+                    ret = ((IEnumerable)ret).Cast<object>().ElementAt(index);
+                    commandNotKnown = false;
+                }
+            }
+            else if (TryParse(dataContext, str, out ret))
                 commandNotKnown = false;
-            }
-
-            // if character is '('
-            else if (splitChar == chars[1] && split[1].Contains(")"))
-            {
-                object[] parameters = null;
-
-                // search for the second bracket
-                var splitParametersAndRest = split[1].SplitOnFirst(')');
-                // split the parameters-string into parts
-                var stringParameters = splitParametersAndRest[0].Split(',');
-
-                // only one parameter => parse string
-                if (stringParameters.Length == 1 && !string.IsNullOrWhiteSpace(stringParameters[0])
-                    && TryParse(stringParameters[0].Trim(), out object parameter, dataContext))
-                    parameters = new[] { parameter };
-                // more than one parameter => convert string to parameters
-                else if (stringParameters.Length > 1)
-                    parameters = stringParameters
-                        .Select(p => ConvertStringToObject(p, dataContext))
-                        .ToArray();
-
-                // parse the method
-                if (TryParse(split[0].Trim(), out obj, dataContext, parameters))
-                    if (splitParametersAndRest.Length > 1 && splitParametersAndRest[1][0] == '.')
-                    {
-                        ret = ConvertStringToObject(newHierarchyLevelString + splitParametersAndRest[1].Substring(1), obj);
-                        commandNotKnown = false;
-                    }
-                    else
-                    {
-                        ret = obj;
-                        commandNotKnown = false;
-                    }
-            }
 
 
             if (commandNotKnown)
@@ -348,8 +364,131 @@ namespace AutoConsole
 
             if (newHierarchyLevel)
                 DataContextHierarchy.Add(ret);
+
             return ret;
         }
+
+        private static string GetNameOfMember(string str, out string rest, out char splitChar)
+        {
+            char[] splitChars = { '.', '(', '[' };
+
+            splitChar = str.SplitOnFirst(splitChars, out string[] splitString);
+
+            rest = splitString.Length > 1
+                ? splitChar + splitString[1]
+                : null;
+
+            return splitString[0];
+        }
+
+        private enum BracketType { Square, Curly, Round }
+        private static bool FindOpeningAndClosingBracket(string str, BracketType bracketType, out int openingBracketIndex, out int closingBracketIndex)
+        {
+            List<char> openingBrackets = null;
+
+            openingBracketIndex = -1;
+            closingBracketIndex = -1;
+
+            var openingBracket = '(';
+            var closingBracket = ')';
+
+            switch (bracketType)
+            {
+                case BracketType.Curly:
+                    openingBracket = '{';
+                    closingBracket = '}';
+                    break;
+                case BracketType.Square:
+                    openingBracket = '[';
+                    closingBracket = ']';
+                    break;
+            }
+
+            for (var i = 0; i < str.Length; i++)
+            {
+                if (str[i] == openingBracket)
+                {
+                    if (EnumerableExtensions.IsNullOrEmpty(openingBrackets))
+                    {
+                        openingBrackets = new List<char> { str[i] };
+                        openingBracketIndex = i;
+                    }
+                    else
+                        openingBrackets.Add(str[i]);
+
+                    continue;
+                }
+
+                if (str[i] == closingBracket)
+                {
+                    if (EnumerableExtensions.IsNullOrEmpty(openingBrackets))
+                        return false;
+
+                    openingBrackets.RemoveLast();
+
+                    if (openingBrackets.Count == 0)
+                    {
+                        closingBracketIndex = i;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static string[] ConvertStringToParameterStringArray(string str)
+        {
+            if (string.IsNullOrEmpty(str))
+                return null;
+
+            var parameterSeparatorIndexes = new List<int>();
+            var parameters = new List<string>();
+            var brackets = new List<char>();
+
+            for (var i = 0; i < str.Length; i++)
+            {
+                if (str[i] == '(')
+                {
+                    brackets.Add(str[i]);
+                    continue;
+                }
+
+                if (str[i] == ')')
+                {
+                    if (EnumerableExtensions.IsNullOrEmpty(brackets))
+                        return null;
+
+                    brackets.RemoveLast();
+                    continue;
+                }
+
+                if (str[i] == ',' && EnumerableExtensions.IsNullOrEmpty(brackets))
+                    parameterSeparatorIndexes.Add(i);
+            }
+
+
+            if (parameterSeparatorIndexes.Count == 0)
+                parameters.Add(str);
+            else
+            {
+                for (var i = 0; i < parameterSeparatorIndexes.Count; i++)
+                {
+                    if (i == 0)
+                    {
+                        parameters.Add(str.Substring(0, parameterSeparatorIndexes[i]));
+                        continue;
+                    }
+
+                    parameters.Add(str.Substring(parameterSeparatorIndexes[i - 1], parameterSeparatorIndexes[i]));
+                }
+
+                parameters.Add(str.Substring(parameterSeparatorIndexes.Last() + 1));
+            }
+
+            return parameters.ToArray();
+        }
+
 
         /// <summary>
         /// <para>
@@ -369,9 +508,11 @@ namespace AutoConsole
         /// <param name="obj">Object in which the parsed value is stored</param>
         /// <param name="dataContext">Object that is used as data context</param>
         /// <returns>true: parse succeeded, false: parse failed</returns>
-        private static bool TryParse(string str, out object obj, object dataContext = null)
+        private static bool TryParse(object dataContext, string str, out object obj)
         {
             obj = null;
+            if (str.Equals("null"))
+                return true;
 
             if (bool.TryParse(str, out bool boolean))
                 obj = boolean;
@@ -391,6 +532,14 @@ namespace AutoConsole
                 var ret = str.Substring(1, str.Length - 2);
 
                 if (!ret.Contains("\""))
+                    obj = ret;
+            }
+
+            else if (str.Length >= 2 && str.Last() == '\'' && str.First() == '\'')
+            {
+                var ret = str.Substring(1, str.Length - 2);
+
+                if (!ret.Contains("'"))
                     obj = ret;
             }
 
@@ -425,12 +574,12 @@ namespace AutoConsole
         /// Else the object parameter <see cref="obj"/> is set to null and false is returned.
         /// </para>
         /// </summary>
-        /// <param name="str">String to parse</param>
-        /// <param name="obj">Object in which the parsed value is stored</param>
         /// <param name="dataContext">Object that is used as data context</param>
+        /// <param name="str">String to parse</param>
         /// <param name="parameters">parameters for the method</param>
+        /// <param name="obj">Object in which the parsed value is stored</param>
         /// <returns>true: parse succeeded, false: parse failed</returns>
-        private static bool TryParse(string str, out object obj, object dataContext, object[] parameters)
+        private static bool TryParse(object dataContext, string str, object[] parameters, out object obj)
         {
             if (dataContext != null)
             {
@@ -446,13 +595,22 @@ namespace AutoConsole
                     method = null;
                     foreach (var m in dataContext.GetType().GetMethods())
                     {
-                        ParameterInfo[] mParameters = m.GetParameters();
+                        var mParameters = m.GetParameters();
 
                         if (m.GetDisplayName() != str || mParameters.Length != parameters.Length)
                             continue;
 
                         for (var i = 0; i < parameters.Length; i++)
                         {
+                            if (parameters[i] == null)
+                            {
+                                method = mParameters[i].ParameterType.IsNullable()
+                                    ? m
+                                    : null;
+
+                                break;
+                            }
+
                             if (mParameters[i].ParameterType == parameters[i].GetType())
                             {
                                 method = m;
@@ -461,7 +619,7 @@ namespace AutoConsole
 
                             try
                             {
-                                var changeType = Convert.ChangeType(parameters[i], mParameters[i].ParameterType);
+                                parameters[i] = Convert.ChangeType(parameters[i], mParameters[i].ParameterType);
                                 method = m;
                                 break;
                             }
@@ -471,6 +629,8 @@ namespace AutoConsole
                             catch (FormatException)
                             {
                             }
+
+                            method = null;
                         }
 
                         if (method != null)
