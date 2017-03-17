@@ -7,6 +7,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using GalaSoft.MvvmLight;
 
@@ -513,13 +514,30 @@ namespace AutoConsole
                 {
                     if (string.IsNullOrWhiteSpace(propertyName) && dataContext is IEnumerable)
                     {
-                        returnValue = ((IEnumerable)dataContext).Cast<object>().ElementAt(index);
+                        try
+                        {
+                            returnValue = ((IEnumerable)dataContext).Cast<object>().ElementAt(index);
+                        }
+                        catch (ArgumentOutOfRangeException e)
+                        {
+                            returnValue = null;
+                            Console.WriteLine(e.Message);
+                        }
+
                         return true;
                     }
 
                     if (TryParse(dataContext, propertyName, out object ret) && ret is IEnumerable)
                     {
-                        returnValue = ((IEnumerable)ret).Cast<object>().ElementAt(index);
+                        try
+                        {
+                            returnValue = ((IEnumerable)ret).Cast<object>().ElementAt(index);
+                        }
+                        catch (ArgumentOutOfRangeException e)
+                        {
+                            returnValue = null;
+                            Console.WriteLine(e.Message);
+                        }
                         return true;
                     }
                 }
