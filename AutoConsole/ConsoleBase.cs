@@ -8,7 +8,9 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices.WindowsRuntime;
 using GalaSoft.MvvmLight;
+
 
 namespace AutoConsole
 {
@@ -30,7 +32,6 @@ namespace AutoConsole
         #endregion FIELDS
 
 
-
         #region  PROPERTIES
 
         /// <summary>
@@ -46,9 +47,10 @@ namespace AutoConsole
         /// </summary>
         public object DataContext
         {
-            get { return DataContextHierarchy.Last(); }
-            set { DataContextHierarchy = new ObservableCollection<object> { value }; }
+            get => DataContextHierarchy.Last();
+            set => DataContextHierarchy = new ObservableCollection<object> {value};
         }
+
         /// <summary>
         /// <para>
         /// Gets the base data context (first of the <see cref="DataContextHierarchy"/> properties)
@@ -62,8 +64,8 @@ namespace AutoConsole
         /// </summary>
         public object BaseDataContext
         {
-            get { return DataContextHierarchy.First(); }
-            set { DataContextHierarchy = new ObservableCollection<object> { value }; }
+            get => DataContextHierarchy.First();
+            set => DataContextHierarchy = new ObservableCollection<object> {value};
         }
 
         /// <summary>
@@ -76,7 +78,7 @@ namespace AutoConsole
         /// </summary>
         protected ObservableCollection<object> DataContextHierarchy
         {
-            get { return _dataContextHierarchy; }
+            get => _dataContextHierarchy;
             set
             {
                 if (Equals(_dataContextHierarchy, value))
@@ -93,6 +95,7 @@ namespace AutoConsole
                 _dataContextHierarchy.CollectionChanged += _DataContextHierarchy_CollectionChanged;
             }
         }
+
         /// <summary>
         /// <para>Gets the data context hierarchy of the class.</para>
         /// <para>The data context is the object from which this object gets its methods and properties.</para>
@@ -101,10 +104,7 @@ namespace AutoConsole
         /// If none of the members of the class have the attribute, all properties and methods are shown.
         /// </para>
         /// </summary>
-        public IReadOnlyCollection<object> ReadOnlyDataContextHierarchy
-        {
-            get { return DataContextHierarchy; }
-        }
+        public IReadOnlyCollection<object> ReadOnlyDataContextHierarchy => DataContextHierarchy;
 
         /// <summary>
         /// <para>Gets or sets the question that is asked to the user of the application.</para>
@@ -138,7 +138,6 @@ namespace AutoConsole
         }
 
         #endregion PROPERTIES
-
 
 
         #region  METHODS
@@ -254,6 +253,7 @@ namespace AutoConsole
                     Question += ")";
                 }
         }
+
         /// <summary>
         /// <para>Adds the methods that have the <see cref="ShowInConsoleAttribute"/> attribute to the property <see cref="Question"/>.</para>
         /// <para>If none of the methods of the class have the attribute, all and methods are shown.</para>
@@ -283,7 +283,6 @@ namespace AutoConsole
             else
                 foreach (var property in properties)
                     Question += $"\r\n\t- {property.GetDisplayName()} ({property.PropertyType.Name})";
-
         }
 
         #endregion create question
@@ -393,7 +392,7 @@ namespace AutoConsole
                 str = str.Substring(2);
             }
 
-            char[] chars = { '.', '(', '[' };
+            char[] chars = {'.', '(', '[', '='};
             var splitChar = str.FindFirst(chars, out int indexOfSplitChar);
 
             string rest = null;
@@ -405,6 +404,8 @@ namespace AutoConsole
             else if (splitChar == '(' && ConvertMethodStringToReturnValue(dataContext, str, out ret, out rest))
                 commandNotKnown = false;
             else if (splitChar == '[' && ConvertArraySelectorStringToReturnValue(dataContext, str, out ret, out rest))
+                commandNotKnown = false;
+            else if (splitChar == '=' && ConvertAssignmentStringToReturnValue(dataContext, str, out ret))
                 commandNotKnown = false;
             else if (TryParse(dataContext, str, out ret))
                 commandNotKnown = false;
@@ -459,7 +460,7 @@ namespace AutoConsole
                 var parameterStrings =
                     ConvertStringToParameterStringArray(
                         rest.Substring(openingBracketIndex + 1,
-                        closingBracketIndex - (openingBracketIndex + 1)));
+                            closingBracketIndex - (openingBracketIndex + 1)));
 
                 var parameters = parameterStrings?
                     .Select(parameterString => ConvertStringToObject(parameterString, dataContext))
@@ -506,20 +507,21 @@ namespace AutoConsole
                 leftOverString = rest.Substring(closingBracketIndex + 1);
 
                 var stringIndex =
-                    ConvertStringToObject(rest.Substring(openingBracketIndex + 1, closingBracketIndex - 1), dataContext)?
+                    ConvertStringToObject(rest.Substring(openingBracketIndex + 1, closingBracketIndex - 1), dataContext)
+                        ?
                         .ToString();
 
                 if (int.TryParse(stringIndex, out int index))
                 {
                     if (string.IsNullOrWhiteSpace(propertyName) && dataContext is IEnumerable)
                     {
-                        returnValue = ((IEnumerable)dataContext).Cast<object>().ElementAt(index);
+                        returnValue = ((IEnumerable) dataContext).Cast<object>().ElementAt(index);
                         return true;
                     }
 
                     if (TryParse(dataContext, propertyName, out object ret) && ret is IEnumerable)
                     {
-                        returnValue = ((IEnumerable)ret).Cast<object>().ElementAt(index);
+                        returnValue = ((IEnumerable) ret).Cast<object>().ElementAt(index);
                         return true;
                     }
                 }
@@ -530,7 +532,45 @@ namespace AutoConsole
             return false;
         }
 
-        private enum BracketType { Square, Curly, Round }
+        private bool ConvertAssignmentStringToReturnValue(object dataContext, string str,
+            out object returnValue)
+        {
+            if (string.IsNullOrEmpty(str) || dataContext == null)
+            {
+                returnValue = null;
+                return false;
+            }
+
+            str = str.Trim();
+            var split = str.SplitOnFirst('=');
+
+            if (split.Length == 1)
+            {
+                returnValue = null;
+                return false;
+            }
+
+            var property = dataContext.GetType().GetProperty(split[0].Trim());
+
+            if (property != null)
+            {
+                var value = ConvertStringToObject(split[1].Trim(), dataContext);
+                property.SetValue(dataContext, value);
+                returnValue = value;
+                return true;
+            }
+
+            returnValue = null;
+            return false;
+        }
+
+        private enum BracketType
+        {
+            Square,
+            Curly,
+            Round
+        }
+
         /// <summary>
         /// <para>Searches for the opening and closing bracket of a certain type.</para>
         /// <para>Sqare = [], Curly = {}, Round = ()</para>
@@ -570,7 +610,7 @@ namespace AutoConsole
                 {
                     if (EnumerableExtensions.IsNullOrEmpty(openingBrackets))
                     {
-                        openingBrackets = new List<char> { str[i] };
+                        openingBrackets = new List<char> {str[i]};
                         openingBracketIndex = i;
                     }
                     else
@@ -727,6 +767,7 @@ namespace AutoConsole
 
             return obj != null;
         }
+
         /// <summary>
         /// <para>
         /// Searches for a method ith the same display name (assigned with the <see cref="DisplayNameAttribute"/> attribute) and parametertypes as the
@@ -754,7 +795,7 @@ namespace AutoConsole
                         dataContext.GetType()
                             .GetMethods()
                             .Find(x => x.GetDisplayName() == str &&
-                                EnumerableExtensions.IsNullOrEmpty(x.GetParameters()));
+                                       EnumerableExtensions.IsNullOrEmpty(x.GetParameters()));
                 else
                 {
                     method = null;
