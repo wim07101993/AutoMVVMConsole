@@ -515,9 +515,7 @@ namespace AutoConsole
                 {
                     if (string.IsNullOrWhiteSpace(propertyName) && dataContext is IEnumerable)
                     {
-<<<<<<< HEAD
                         returnValue = ((IEnumerable) dataContext).Cast<object>().ElementAt(index);
-=======
                         try
                         {
                             returnValue = ((IEnumerable)dataContext).Cast<object>().ElementAt(index);
@@ -527,16 +525,12 @@ namespace AutoConsole
                             returnValue = null;
                             Console.WriteLine(e.Message);
                         }
-
->>>>>>> origin/develop
                         return true;
                     }
 
                     if (TryParse(dataContext, propertyName, out object ret) && ret is IEnumerable)
                     {
-<<<<<<< HEAD
                         returnValue = ((IEnumerable) ret).Cast<object>().ElementAt(index);
-=======
                         try
                         {
                             returnValue = ((IEnumerable)ret).Cast<object>().ElementAt(index);
@@ -546,7 +540,6 @@ namespace AutoConsole
                             returnValue = null;
                             Console.WriteLine(e.Message);
                         }
->>>>>>> origin/develop
                         return true;
                     }
                 }
