@@ -1,12 +1,13 @@
 ﻿using AutoConsole.Attributes;
-using ClassLibrary.Extensions;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
+using ClassLibrary.Portable.Extensions;
 
 
 namespace AutoConsole
@@ -44,7 +45,7 @@ namespace AutoConsole
         /// </summary>
         public object DataContext
         {
-            get => DataContextHierarchy.Last();
+            get => Enumerable.Last(DataContextHierarchy);
             set => DataContextHierarchy = new ObservableCollection<object> {value};
         }
 
@@ -61,7 +62,7 @@ namespace AutoConsole
         /// </summary>
         public object BaseDataContext
         {
-            get => DataContextHierarchy.First();
+            get => Enumerable.First(DataContextHierarchy);
             set => DataContextHierarchy = new ObservableCollection<object> {value};
         }
 
@@ -242,7 +243,7 @@ namespace AutoConsole
                     if (!EnumerableExtensions.IsNullOrEmpty(parameters))
                     {
                         foreach (var parameter in parameters)
-                            Question += $"{parameter.ParameterType.Name} {parameter.GetName()}, ";
+                            Question += $"{parameter.ParameterType.Name} {parameter.Name}, ";
 
                         Question = Question.Substring(0, Question.Length - 2);
                     }
@@ -305,6 +306,7 @@ namespace AutoConsole
                     return true;
                 case "\\exit":
                     Environment.Exit(Environment.ExitCode);
+                    // ReSharper disable once HeuristicUnreachableCode
                     return true;
                 case "\\h":
                 case "\\help":
@@ -329,7 +331,7 @@ namespace AutoConsole
                 case "\\return":
                 case "return":
                     if (DataContextHierarchy.Count > 1)
-                        DataContextHierarchy.RemoveLast();
+                        ((IList)DataContextHierarchy).RemoveLast();
                     else
                         Console.WriteLine("Allready on at level");
                     return true;
@@ -599,6 +601,10 @@ namespace AutoConsole
                     openingBracket = '[';
                     closingBracket = ']';
                     break;
+                case BracketType.Round:
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(bracketType), bracketType, null);
             }
 
             for (var i = 0; i < str.Length; i++)
@@ -611,7 +617,7 @@ namespace AutoConsole
                         openingBracketIndex = i;
                     }
                     else
-                        openingBrackets.Add(str[i]);
+                        openingBrackets?.Add(str[i]);
 
                     continue;
                 }
@@ -621,9 +627,9 @@ namespace AutoConsole
                     if (EnumerableExtensions.IsNullOrEmpty(openingBrackets))
                         return false;
 
-                    openingBrackets.RemoveLast();
+                    ((IList)openingBrackets).RemoveLast();
 
-                    if (openingBrackets.Count == 0)
+                    if (openingBrackets?.Count == 0)
                     {
                         closingBracketIndex = i;
                         return true;
@@ -661,7 +667,7 @@ namespace AutoConsole
                     if (EnumerableExtensions.IsNullOrEmpty(brackets))
                         return null;
 
-                    brackets.RemoveLast();
+                    ((IList)brackets).RemoveLast();
                     continue;
                 }
 
@@ -685,7 +691,7 @@ namespace AutoConsole
                     parameters.Add(str.Substring(parameterSeparatorIndexes[i - 1], parameterSeparatorIndexes[i]));
                 }
 
-                parameters.Add(str.Substring(parameterSeparatorIndexes.Last() + 1));
+                parameters.Add(str.Substring(Enumerable.Last(parameterSeparatorIndexes) + 1));
             }
 
             return parameters.ToArray();
